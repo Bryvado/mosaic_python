@@ -351,6 +351,25 @@ class AlgorithmRunner:
                 f"max_attempts_per_stage={n3_max_attempts_per_stage}"
             )
 
+        def _selected_election_pair() -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+            if not self.election_arrays:
+                return None, None
+            (active_idx,) = self.state.get("active_election_index")
+            idx = max(0, min(int(active_idx), len(self.election_arrays) - 1))
+            return self.election_arrays[idx]
+
+        def _compute_competitive_count(
+            assignment_arr: np.ndarray, dem_votes: Optional[np.ndarray], gop_votes: Optional[np.ndarray]
+        ) -> int:
+            if dem_votes is None or gop_votes is None:
+                return 0
+            dem_d = np.bincount(assignment_arr, weights=dem_votes.astype(np.float64), minlength=num_districts)
+            gop_d = np.bincount(assignment_arr, weights=gop_votes.astype(np.float64), minlength=num_districts)
+            tot_d = dem_d + gop_d
+            shares = np.where(tot_d > 0, dem_d / tot_d, 0.5)
+            return int((np.abs(shares - 0.5) < 0.05).sum())
+
+        selected_dem_votes, selected_gop_votes = _selected_election_pair()
         _skw = dict(
             county_ids=self.county_array,
             populations=self.populations,
@@ -359,8 +378,8 @@ class AlgorithmRunner:
             pp_data=self.pp_data,
             reock_data=self.reock_data,
             n_districts=num_districts,
-            dem_votes=self.election_arrays[0][0] if self.election_arrays else None,
-            gop_votes=self.election_arrays[0][1] if self.election_arrays else None,
+            dem_votes=selected_dem_votes,
+            gop_votes=selected_gop_votes,
         )
 
         worse_window: deque[int] = deque(maxlen=_ACCEPTANCE_WINDOW)
@@ -458,14 +477,7 @@ class AlgorithmRunner:
 
             # Competitive district count carries across iterations; refreshed
             # only on accepted proposals (assignment is unchanged on reject).
-            comp_count = 0
-            if self.election_arrays:
-                _dem, _gop = self.election_arrays[0]
-                _dem_d = np.bincount(assignment, weights=_dem.astype(np.float64), minlength=num_districts)
-                _gop_d = np.bincount(assignment, weights=_gop.astype(np.float64), minlength=num_districts)
-                _tot_d = _dem_d + _gop_d
-                _shares = np.where(_tot_d > 0, _dem_d / _tot_d, 0.5)
-                comp_count = int((np.abs(_shares - 0.5) < 0.05).sum())
+            comp_count = _compute_competitive_count(assignment, selected_dem_votes, selected_gop_votes)
 
             for iteration in range(1, max_iterations + 1):
                 # Launch Watch: re-anchor temperature after the first N iters
@@ -546,8 +558,10 @@ class AlgorithmRunner:
                     continue
 
                 # ── Score proposal ───────────────────────────────────────────
-                proposed_ps = score_plan(new_cut_indices, score_config,
-                                         assignment=new_assignment, **_skw)
+                selected_dem_votes, selected_gop_votes = _selected_election_pair()
+                _skw["dem_votes"] = selected_dem_votes
+                _skw["gop_votes"] = selected_gop_votes
+                proposed_ps = score_plan(new_cut_indices, score_config, assignment=new_assignment, **_skw)
 
                 # ── Metropolis acceptance ────────────────────────────────────
                 if ann is not None:
@@ -572,13 +586,7 @@ class AlgorithmRunner:
                         successful_steps=self.state.successful_steps + 1,
                         score_breakdown=_build_score_breakdown(current_ps, score_config),
                     )
-                    if self.election_arrays:
-                        _dem, _gop = self.election_arrays[0]
-                        _dem_d = np.bincount(assignment, weights=_dem.astype(np.float64), minlength=num_districts)
-                        _gop_d = np.bincount(assignment, weights=_gop.astype(np.float64), minlength=num_districts)
-                        _tot_d = _dem_d + _gop_d
-                        _shares = np.where(_tot_d > 0, _dem_d / _tot_d, 0.5)
-                        comp_count = int((np.abs(_shares - 0.5) < 0.05).sum())
+                    comp_count = _compute_competitive_count(assignment, selected_dem_votes, selected_gop_votes)
                 else:
                     self.state.update(current_iteration=iteration)
 
