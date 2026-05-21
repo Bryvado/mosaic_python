@@ -20,6 +20,7 @@ log = logging.getLogger("mosaic")
 
 _W = 580
 _H = 760
+MAX_ELECTIONS = 5
 
 
 class ShapefileDialog:
@@ -145,7 +146,7 @@ class ShapefileDialog:
                     callback=self._on_add_election,
                     width=130,
                 )
-                self.theme.text("  (one election supported)", "disabled")
+                self.theme.text("  (up to 5 elections)", "disabled")
 
             dpg.add_separator()
 
@@ -308,8 +309,8 @@ class ShapefileDialog:
     def _on_add_election(self) -> None:
         if self._inspection is None or self._inspection.gdf is None:
             return
-        if self._election_active:
-            return  # only one election supported
+        if len(self._election_active) >= MAX_ELECTIONS:
+            return
 
         i = self._election_next_id
         self._election_next_id += 1
@@ -317,6 +318,7 @@ class ShapefileDialog:
 
         if len(self._election_active) == 1:
             dpg.configure_item("shp_no_elections_text", show=False)
+        if len(self._election_active) >= MAX_ELECTIONS:
             dpg.configure_item("shp_add_election_btn", enabled=False)
 
         cols = self._inspection.columns
@@ -370,6 +372,7 @@ class ShapefileDialog:
             self._election_active.remove(i)
         if not self._election_active:
             dpg.configure_item("shp_no_elections_text", show=True)
+        if len(self._election_active) < MAX_ELECTIONS:
             dpg.configure_item("shp_add_election_btn", enabled=True)
 
     def _on_election_change(self, sender, app_data, user_data) -> None:
@@ -397,7 +400,7 @@ class ShapefileDialog:
         county_col = None if (not county_val or county_val == "(none)") else county_val
 
         elections: list[tuple[str, str]] = []
-        for i in self._election_active:
+        for i in sorted(self._election_active):
             dem = dpg.get_value(f"shp_elec_{i}_dem")
             gop = dpg.get_value(f"shp_elec_{i}_gop")
             if dem and gop:
