@@ -277,6 +277,7 @@ class MosaicApp:
         # Track what data the current shapefile has
         self._has_elections: bool = False
         self._has_county: bool = False
+        self._active_election_combo: int | str = ""
 
         # Tracks whether the last frame was in a "running" state, so we can
         # trigger a one-shot precise-label re-render on transitions out of
@@ -928,6 +929,15 @@ class MosaicApp:
                                     width=_SCORE_COL_W - 100,
                                 )
                             dpg.add_spacer(height=4)
+
+                        with dpg.group(horizontal=True, tag="active_election_controls", show=False):
+                            dpg.add_text("Active Election")
+                            self._active_election_combo = dpg.add_combo(
+                                items=[],
+                                width=_SCORE_COL_W - 170,
+                                callback=self._on_active_election_change,
+                            )
+                        dpg.add_spacer(height=4)
 
                         with dpg.group(tag="score_row_mm", show=False):
                             with dpg.group(horizontal=True):
@@ -1905,9 +1915,8 @@ class MosaicApp:
 
         # Vote shares
         dem_pct = rep_pct = None
-        if (self.runner.election_arrays
-                and len(self.runner.election_arrays[0][0]) == len(assignment)):
-            dem, gop = self.runner.election_arrays[0]
+        dem, gop = self._get_active_election_arrays(assignment_len=len(assignment))
+        if dem is not None and gop is not None:
             dem_d = np.bincount(assignment, weights=dem.astype(np.float64),
                                 minlength=n_dist)
             gop_d = np.bincount(assignment, weights=gop.astype(np.float64),
@@ -2129,10 +2138,7 @@ class MosaicApp:
             self._map_loaded_gdf_id = loaded_gdf_id
             gdf_ref = self.runner.gdf
             county_array_ref = self.runner.county_array
-            dem_ref = (self.runner.election_arrays[0][0]
-                       if self.runner.election_arrays else None)
-            gop_ref = (self.runner.election_arrays[0][1]
-                       if self.runner.election_arrays else None)
+            dem_ref, gop_ref = self._get_active_election_arrays()
             pp_data_ref  = self.runner.pp_data
             pop_ref      = self.runner.populations
             mv = self.map_view
@@ -2544,10 +2550,9 @@ class MosaicApp:
                 _pa = (self.state.current_assignment.copy()
                        if self.state.current_assignment is not None else None)
                 _pnd = self.state.num_districts
+            _dem, _gop = self._get_active_election_arrays(assignment_len=len(_pa) if _pa is not None else None)
             if (_pa is not None and self.runner is not None
-                    and self.runner.election_arrays
-                    and len(self.runner.election_arrays[0][0]) == len(_pa)):
-                _dem, _gop = self.runner.election_arrays[0]
+                    and _dem is not None and _gop is not None):
                 _dem_d = np.bincount(_pa, weights=_dem.astype(np.float64), minlength=_pnd)
                 _gop_d = np.bincount(_pa, weights=_gop.astype(np.float64), minlength=_pnd)
                 _tot_d = _dem_d + _gop_d
@@ -2578,10 +2583,9 @@ class MosaicApp:
                 _wa = (self.state.current_assignment.copy()
                        if self.state.current_assignment is not None else None)
                 _wnd = self.state.num_districts
+            _dem, _gop = self._get_active_election_arrays(assignment_len=len(_wa) if _wa is not None else None)
             if (_wa is not None and self.runner is not None
-                    and self.runner.election_arrays
-                    and len(self.runner.election_arrays[0][0]) == len(_wa)):
-                _dem, _gop = self.runner.election_arrays[0]
+                    and _dem is not None and _gop is not None):
                 _dem_d = np.bincount(_wa, weights=_dem.astype(np.float64), minlength=_wnd)
                 _gop_d = np.bincount(_wa, weights=_gop.astype(np.float64), minlength=_wnd)
                 _tot_d = _dem_d + _gop_d
@@ -2696,6 +2700,15 @@ class MosaicApp:
         # Partisan overlay map toggle
         has_elections = bool(cfg.elections)
         self._has_elections = has_elections
+        election_labels = [f"{dem_col} vs {gop_col}" for dem_col, gop_col in cfg.elections]
+        dpg.configure_item(self._active_election_combo, items=election_labels, enabled=has_elections)
+        dpg.configure_item("active_election_controls", show=has_elections)
+        idx = min(max(int(self.state.active_election_index), 0), max(len(election_labels) - 1, 0))
+        self.state.update(active_election_index=idx)
+        if election_labels:
+            dpg.set_value(self._active_election_combo, election_labels[idx])
+        else:
+            dpg.set_value(self._active_election_combo, "")
         dpg.configure_item(self._partisan_overlay, enabled=has_elections)
         dpg.configure_item(self._district_partisan, enabled=has_elections)
         if not has_elections:
@@ -3055,6 +3068,28 @@ class MosaicApp:
             return
         self.map_view.precinct_overlay = dpg.get_value(self._precinct_overlay)
         self.state.update(map_needs_update=True)
+
+
+    def _on_active_election_change(self, sender, app_data):
+        if self._loaded_config is None:
+            return
+        labels = [f"{dem_col} vs {gop_col}" for dem_col, gop_col in self._loaded_config.elections]
+        try:
+            idx = labels.index(app_data)
+        except ValueError:
+            idx = 0
+        self.state.update(active_election_index=idx)
+
+    def _get_active_election_arrays(self, assignment_len: Optional[int] = None):
+        if self.runner is None or not self.runner.election_arrays:
+            return None, None
+        idx = int(self.state.active_election_index)
+        if idx < 0 or idx >= len(self.runner.election_arrays):
+            return None, None
+        dem, gop = self.runner.election_arrays[idx]
+        if assignment_len is not None and len(dem) != assignment_len:
+            return None, None
+        return dem, gop
 
     def _on_partisan_overlay_toggle(self):
         if dpg.get_value(self._partisan_overlay):
@@ -3521,8 +3556,7 @@ class MosaicApp:
         n_dist = self.state.num_districts
         ideal_pop = (float(self.runner.populations.sum()) / n_dist
                      if n_dist > 0 else 1.0)
-        dem = self.runner.election_arrays[0][0] if self.runner.election_arrays else None
-        gop = self.runner.election_arrays[0][1] if self.runner.election_arrays else None
+        dem, gop = self._get_active_election_arrays()
 
         save_metrics(
             self._stable_labeled_best_assignment(),
@@ -3584,10 +3618,7 @@ class MosaicApp:
         # not 100%. Keeps high-DPI exports from over-emphasizing borders.
         offscreen.border_thickness = max(1, int(round(1 + 0.5 * (scale - 1))))
 
-        dem = (self.runner.election_arrays[0][0]
-               if self.runner.election_arrays else None)
-        gop = (self.runner.election_arrays[0][1]
-               if self.runner.election_arrays else None)
+        dem, gop = self._get_active_election_arrays()
         offscreen.load(
             self.runner.gdf,
             county_array=self.runner.county_array,

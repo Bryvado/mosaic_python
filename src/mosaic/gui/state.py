@@ -44,6 +44,7 @@ class SharedState:
     pop_tolerance: float = 0.025
     max_iterations: int = 1000
     seed: Optional[int] = None
+    active_election_index: int = 0
 
     # Score config (set by GUI before run)
     score_config: ScoreConfig = field(default_factory=ScoreConfig)
