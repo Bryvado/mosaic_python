@@ -2330,6 +2330,18 @@ class MosaicApp:
 
     def _update_plots_and_panels(self) -> None:
         """Per-frame plot redraws and side panel refreshes."""
+        if self._has_elections:
+            with self.state._lock:
+                idx = int(self.state.active_election_index or 0)
+                if idx < 0:
+                    idx = 0
+                self.state.mm_history = list(self.state.mm_history_by_election.get(idx, []))
+                self.state.eg_history = list(self.state.eg_history_by_election.get(idx, []))
+                self.state.dem_seats_history = list(self.state.dem_seats_history_by_election.get(idx, []))
+                self.state.competitive_count_history = list(self.state.competitive_count_history_by_election.get(idx, []))
+                self.state.majority_dem_history = list(self.state.majority_dem_history_by_election.get(idx, []))
+                self.state.majority_rep_history = list(self.state.majority_rep_history_by_election.get(idx, []))
+                self.state.hinge_history = list(self.state.hinge_history_by_election.get(idx, []))
         # ── Plots ─────────────────────────────────────────────────────────────
         # One lock acquisition, copying only the delta since the last call.
         with self.state._lock:
@@ -2696,6 +2708,18 @@ class MosaicApp:
         # Partisan overlay map toggle
         has_elections = bool(cfg.elections)
         self._has_elections = has_elections
+        with self.state._lock:
+            if not has_elections:
+                self.state.active_election_index = 0
+                self.state.active_election_label = "no-election"
+            else:
+                n_elections = len(cfg.elections)
+                cur = int(self.state.active_election_index or 0)
+                if cur < 0 or cur >= n_elections:
+                    cur = 0
+                self.state.active_election_index = cur
+                dem_col, gop_col = cfg.elections[cur]
+                self.state.active_election_label = f"{dem_col}/{gop_col}"
         dpg.configure_item(self._partisan_overlay, enabled=has_elections)
         dpg.configure_item(self._district_partisan, enabled=has_elections)
         if not has_elections:
@@ -2760,6 +2784,13 @@ class MosaicApp:
             if not has_elections and dpg.is_item_shown(panel_tag):
                 dpg.set_value(item_tag, False)
                 dpg.configure_item(panel_tag, show=False)
+        if has_elections and len(cfg.elections) < 2:
+            self.state.update(
+                status_message=(
+                    f"Loaded {stem} (1 election). "
+                    f"Partisan metrics bound to election[0]: {self.state.active_election_label}"
+                )
+            )
 
     # ── Popup toggle callbacks ────────────────────────────────────────────────
 
@@ -3521,8 +3552,12 @@ class MosaicApp:
         n_dist = self.state.num_districts
         ideal_pop = (float(self.runner.populations.sum()) / n_dist
                      if n_dist > 0 else 1.0)
-        dem = self.runner.election_arrays[0][0] if self.runner.election_arrays else None
-        gop = self.runner.election_arrays[0][1] if self.runner.election_arrays else None
+        e_idx = int(self.state.active_election_index or 0)
+        if self.runner.election_arrays and 0 <= e_idx < len(self.runner.election_arrays):
+            dem = self.runner.election_arrays[e_idx][0]
+            gop = self.runner.election_arrays[e_idx][1]
+        else:
+            dem = gop = None
 
         save_metrics(
             self._stable_labeled_best_assignment(),
@@ -3533,7 +3568,10 @@ class MosaicApp:
             gop_votes=gop,
             pp_data=self.runner.pp_data,
         )
-        self.state.update(status_message=f"Metrics saved to {output_path}")
+        e_lbl = self.state.active_election_label or f"index {e_idx}"
+        self.state.update(
+            status_message=f"Metrics saved to {output_path} (election[{e_idx}]: {e_lbl})"
+        )
 
     def _render_map_at_scale(self, scale: float,
                              state_outline: bool = False) -> Optional[np.ndarray]:
@@ -3584,10 +3622,12 @@ class MosaicApp:
         # not 100%. Keeps high-DPI exports from over-emphasizing borders.
         offscreen.border_thickness = max(1, int(round(1 + 0.5 * (scale - 1))))
 
-        dem = (self.runner.election_arrays[0][0]
-               if self.runner.election_arrays else None)
-        gop = (self.runner.election_arrays[0][1]
-               if self.runner.election_arrays else None)
+        e_idx = int(self.state.active_election_index or 0)
+        if self.runner.election_arrays and 0 <= e_idx < len(self.runner.election_arrays):
+            dem = self.runner.election_arrays[e_idx][0]
+            gop = self.runner.election_arrays[e_idx][1]
+        else:
+            dem = gop = None
         offscreen.load(
             self.runner.gdf,
             county_array=self.runner.county_array,

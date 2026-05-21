@@ -87,6 +87,7 @@ class AlgorithmRunner:
         self.pp_data: Optional[PPData] = None
         self.reock_data: Optional[ReockData] = None
         self.election_arrays: list[tuple[np.ndarray, np.ndarray]] = []
+        self.election_labels: list[str] = []
         self.id_col_name: str = "precinct_id"
 
         # Holds the ShapefileInspection until the user confirms in the dialog
@@ -190,6 +191,7 @@ class AlgorithmRunner:
 
             # Election arrays
             self.election_arrays = []
+            self.election_labels = []
             for dem_col, gop_col in config.elections:
                 if dem_col in gdf.columns and gop_col in gdf.columns:
                     dem_s = gdf[dem_col]
@@ -203,6 +205,7 @@ class AlgorithmRunner:
                     dem = dem_s.values.astype(np.int64)
                     gop = gop_s.values.astype(np.int64)
                     self.election_arrays.append((dem, gop))
+                    self.election_labels.append(f"{dem_col}/{gop_col}")
                     log.info(f"Election: {dem_col}/{gop_col} — "
                              f"D:{dem.sum():,}  R:{gop.sum():,}")
 
@@ -351,6 +354,13 @@ class AlgorithmRunner:
                 f"max_attempts_per_stage={n3_max_attempts_per_stage}"
             )
 
+        with self.state._lock:
+            election_idx = int(self.state.active_election_index or 0)
+        if not self.election_arrays or election_idx < 0 or election_idx >= len(self.election_arrays):
+            election_idx = 0
+        active_dem = self.election_arrays[election_idx][0] if self.election_arrays else None
+        active_gop = self.election_arrays[election_idx][1] if self.election_arrays else None
+
         _skw = dict(
             county_ids=self.county_array,
             populations=self.populations,
@@ -359,8 +369,8 @@ class AlgorithmRunner:
             pp_data=self.pp_data,
             reock_data=self.reock_data,
             n_districts=num_districts,
-            dem_votes=self.election_arrays[0][0] if self.election_arrays else None,
-            gop_votes=self.election_arrays[0][1] if self.election_arrays else None,
+            dem_votes=active_dem,
+            gop_votes=active_gop,
         )
 
         worse_window: deque[int] = deque(maxlen=_ACCEPTANCE_WINDOW)
@@ -415,6 +425,14 @@ class AlgorithmRunner:
                 self.state.majority_dem_history.append(current_ps.majority_chance_dem)
                 self.state.majority_rep_history.append(current_ps.majority_chance_rep)
                 self.state.hinge_history.append(current_ps.hinge_chance)
+                if self.election_arrays:
+                    self.state.mm_history_by_election.setdefault(election_idx, []).append(current_ps.mean_median)
+                    self.state.eg_history_by_election.setdefault(election_idx, []).append(current_ps.efficiency_gap)
+                    self.state.dem_seats_history_by_election.setdefault(election_idx, []).append(current_ps.dem_seats)
+                    self.state.competitive_count_history_by_election.setdefault(election_idx, []).append(0)
+                    self.state.majority_dem_history_by_election.setdefault(election_idx, []).append(current_ps.majority_chance_dem)
+                    self.state.majority_rep_history_by_election.setdefault(election_idx, []).append(current_ps.majority_chance_rep)
+                    self.state.hinge_history_by_election.setdefault(election_idx, []).append(current_ps.hinge_chance)
 
             self.state.update(
                 status=AlgorithmStatus.RUNNING,
@@ -573,7 +591,7 @@ class AlgorithmRunner:
                         score_breakdown=_build_score_breakdown(current_ps, score_config),
                     )
                     if self.election_arrays:
-                        _dem, _gop = self.election_arrays[0]
+                        _dem, _gop = active_dem, active_gop
                         _dem_d = np.bincount(assignment, weights=_dem.astype(np.float64), minlength=num_districts)
                         _gop_d = np.bincount(assignment, weights=_gop.astype(np.float64), minlength=num_districts)
                         _tot_d = _dem_d + _gop_d
@@ -601,6 +619,14 @@ class AlgorithmRunner:
                     self.state.majority_dem_history.append(current_ps.majority_chance_dem)
                     self.state.majority_rep_history.append(current_ps.majority_chance_rep)
                     self.state.hinge_history.append(current_ps.hinge_chance)
+                    if self.election_arrays:
+                        self.state.mm_history_by_election.setdefault(election_idx, []).append(current_ps.mean_median)
+                        self.state.eg_history_by_election.setdefault(election_idx, []).append(current_ps.efficiency_gap)
+                        self.state.dem_seats_history_by_election.setdefault(election_idx, []).append(current_ps.dem_seats)
+                        self.state.competitive_count_history_by_election.setdefault(election_idx, []).append(comp_count)
+                        self.state.majority_dem_history_by_election.setdefault(election_idx, []).append(current_ps.majority_chance_dem)
+                        self.state.majority_rep_history_by_election.setdefault(election_idx, []).append(current_ps.majority_chance_rep)
+                        self.state.hinge_history_by_election.setdefault(election_idx, []).append(current_ps.hinge_chance)
                     n_score = len(self.state.score_history)
                     if ann is not None:
                         self.state.temperature_history.append(ann.temperature)
