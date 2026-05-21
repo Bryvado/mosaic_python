@@ -3,7 +3,7 @@ Shapefile column-picker popup.
 
 Shown after the shapefile is read but before the graph is built.
 The user selects which column is Population, which is the Precinct ID,
-an optional County column, and any number of DEM/GOP election pairs.
+an optional County column, and up to five DEM/GOP election pairs.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ log = logging.getLogger("mosaic")
 
 _W = 580
 _H = 760
+_MAX_ELECTIONS = 5
 
 
 class ShapefileDialog:
@@ -145,7 +146,7 @@ class ShapefileDialog:
                     callback=self._on_add_election,
                     width=130,
                 )
-                self.theme.text("  (one election supported)", "disabled")
+                self.theme.text("  (up to 5 elections supported)", "disabled")
 
             dpg.add_separator()
 
@@ -308,16 +309,20 @@ class ShapefileDialog:
     def _on_add_election(self) -> None:
         if self._inspection is None or self._inspection.gdf is None:
             return
-        if self._election_active:
-            return  # only one election supported
+        if len(self._election_active) >= _MAX_ELECTIONS:
+            dpg.set_value(
+                self._confirm_err,
+                f"You can add at most {_MAX_ELECTIONS} elections.",
+            )
+            return
 
         i = self._election_next_id
         self._election_next_id += 1
         self._election_active.append(i)
+        dpg.set_value(self._confirm_err, "")
 
         if len(self._election_active) == 1:
             dpg.configure_item("shp_no_elections_text", show=False)
-            dpg.configure_item("shp_add_election_btn", enabled=False)
 
         cols = self._inspection.columns
         row_tag = f"shp_elec_{i}_row"
@@ -370,7 +375,6 @@ class ShapefileDialog:
             self._election_active.remove(i)
         if not self._election_active:
             dpg.configure_item("shp_no_elections_text", show=True)
-            dpg.configure_item("shp_add_election_btn", enabled=True)
 
     def _on_election_change(self, sender, app_data, user_data) -> None:
         i = user_data
