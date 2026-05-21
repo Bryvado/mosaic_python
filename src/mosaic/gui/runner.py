@@ -476,14 +476,7 @@ class AlgorithmRunner:
 
             # Competitive district count carries across iterations; refreshed
             # only on accepted proposals (assignment is unchanged on reject).
-            comp_count = 0
-            if self.election_arrays:
-                _dem, _gop = self.election_arrays[0]
-                _dem_d = np.bincount(assignment, weights=_dem.astype(np.float64), minlength=num_districts)
-                _gop_d = np.bincount(assignment, weights=_gop.astype(np.float64), minlength=num_districts)
-                _tot_d = _dem_d + _gop_d
-                _shares = np.where(_tot_d > 0, _dem_d / _tot_d, 0.5)
-                comp_count = int((np.abs(_shares - 0.5) < 0.05).sum())
+            comp_count = _compute_competitive_count(assignment, selected_dem_votes, selected_gop_votes)
 
             for iteration in range(1, max_iterations + 1):
                 # Launch Watch: re-anchor temperature after the first N iters
@@ -564,8 +557,10 @@ class AlgorithmRunner:
                     continue
 
                 # ── Score proposal ───────────────────────────────────────────
-                proposed_ps = score_plan(new_cut_indices, score_config,
-                                         assignment=new_assignment, **_skw)
+                selected_dem_votes, selected_gop_votes = _selected_election_pair()
+                _skw["dem_votes"] = selected_dem_votes
+                _skw["gop_votes"] = selected_gop_votes
+                proposed_ps = score_plan(new_cut_indices, score_config, assignment=new_assignment, **_skw)
 
                 # ── Metropolis acceptance ────────────────────────────────────
                 if ann is not None:
