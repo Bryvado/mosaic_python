@@ -44,6 +44,7 @@ class SharedState:
     pop_tolerance: float = 0.025
     max_iterations: int = 1000
     seed: Optional[int] = None
+    active_election_index: int = 0
 
     # Score config (set by GUI before run)
     score_config: ScoreConfig = field(default_factory=ScoreConfig)
@@ -100,6 +101,16 @@ class SharedState:
     majority_dem_history: list = field(default_factory=list)
     majority_rep_history: list = field(default_factory=list)
     hinge_history: list = field(default_factory=list)
+    # Per-election partisan histories (keyed by election index)
+    mm_history_by_election: dict = field(default_factory=dict)
+    eg_history_by_election: dict = field(default_factory=dict)
+    dem_seats_history_by_election: dict = field(default_factory=dict)
+    competitive_count_history_by_election: dict = field(default_factory=dict)
+    majority_dem_history_by_election: dict = field(default_factory=dict)
+    majority_rep_history_by_election: dict = field(default_factory=dict)
+    hinge_history_by_election: dict = field(default_factory=dict)
+    active_election_index: int = 0
+    active_election_label: str = ""
 
     # Score breakdown: metric name → % of total weighted score (updated by runner)
     score_breakdown: dict = field(default_factory=dict)
@@ -200,6 +211,15 @@ class SharedState:
             self.majority_dem_history = []
             self.majority_rep_history = []
             self.hinge_history = []
+            self.mm_history_by_election = {}
+            self.eg_history_by_election = {}
+            self.dem_seats_history_by_election = {}
+            self.competitive_count_history_by_election = {}
+            self.majority_dem_history_by_election = {}
+            self.majority_rep_history_by_election = {}
+            self.hinge_history_by_election = {}
+            self.active_election_index = 0
+            self.active_election_label = ""
             self.score_breakdown = {}
             self.initial_assignment = None
             self.map_needs_update = False
