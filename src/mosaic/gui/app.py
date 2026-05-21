@@ -2336,6 +2336,18 @@ class MosaicApp:
 
     def _update_plots_and_panels(self) -> None:
         """Per-frame plot redraws and side panel refreshes."""
+        if self._has_elections:
+            with self.state._lock:
+                idx = int(self.state.active_election_index or 0)
+                if idx < 0:
+                    idx = 0
+                self.state.mm_history = list(self.state.mm_history_by_election.get(idx, []))
+                self.state.eg_history = list(self.state.eg_history_by_election.get(idx, []))
+                self.state.dem_seats_history = list(self.state.dem_seats_history_by_election.get(idx, []))
+                self.state.competitive_count_history = list(self.state.competitive_count_history_by_election.get(idx, []))
+                self.state.majority_dem_history = list(self.state.majority_dem_history_by_election.get(idx, []))
+                self.state.majority_rep_history = list(self.state.majority_rep_history_by_election.get(idx, []))
+                self.state.hinge_history = list(self.state.hinge_history_by_election.get(idx, []))
         # ── Plots ─────────────────────────────────────────────────────────────
         # One lock acquisition, copying only the delta since the last call.
         with self.state._lock:
@@ -2773,6 +2785,13 @@ class MosaicApp:
             if not has_elections and dpg.is_item_shown(panel_tag):
                 dpg.set_value(item_tag, False)
                 dpg.configure_item(panel_tag, show=False)
+        if has_elections and len(cfg.elections) < 2:
+            self.state.update(
+                status_message=(
+                    f"Loaded {stem} (1 election). "
+                    f"Partisan metrics bound to election[0]: {self.state.active_election_label}"
+                )
+            )
 
     # ── Popup toggle callbacks ────────────────────────────────────────────────
 
@@ -3567,7 +3586,10 @@ class MosaicApp:
             gop_votes=gop,
             pp_data=self.runner.pp_data,
         )
-        self.state.update(status_message=f"Metrics saved to {output_path}")
+        e_lbl = self.state.active_election_label or f"index {e_idx}"
+        self.state.update(
+            status_message=f"Metrics saved to {output_path} (election[{e_idx}]: {e_lbl})"
+        )
 
     def _render_map_at_scale(self, scale: float,
                              state_outline: bool = False) -> Optional[np.ndarray]:
