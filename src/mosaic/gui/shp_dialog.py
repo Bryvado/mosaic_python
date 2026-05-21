@@ -401,7 +401,7 @@ class ShapefileDialog:
         county_col = None if (not county_val or county_val == "(none)") else county_val
 
         elections: list[tuple[str, str]] = []
-        for i in self._election_active:
+        for i in sorted(self._election_active):
             dem = dpg.get_value(f"shp_elec_{i}_dem")
             gop = dpg.get_value(f"shp_elec_{i}_gop")
             if dem and gop:
